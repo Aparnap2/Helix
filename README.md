@@ -1,4 +1,5 @@
-<img width="500" height="500" alt="Gemini_Generated_Image_vuf54lvuf54lvuf5-removebg-preview" src="https://github.com/user-attachments/assets/f4bd84a6-475f-408c-95f6-454f9f430575" />
+<img width="1280" height="320" alt="Untitled design (7)-Photoroom" src="https://github.com/user-attachments/assets/042d86a1-524b-45a5-b490-0d99bffe76a7" />
+
 
 
 
