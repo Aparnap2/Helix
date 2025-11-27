@@ -1,0 +1,164 @@
+# Helix AI Gateway Production Dockerfile
+# Multi-stage build with security hardening, health checks, and optimizations
+
+# Base image with shared dependencies
+FROM python:3.11-slim as base
+
+# Set environment variables for all stages
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    TZ=UTC \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+# Install system dependencies in base layer for better caching
+RUN apt-get update && apt-get install -y \
+    # Core utilities and build tools
+    curl \
+    wget \
+    git \
+    build-essential \
+    pkg-config \
+    software-properties-common \
+    apt-transport-https \
+    ca-certificates \
+    gnupg \
+    lsb-release \
+    # Security and monitoring tools
+    htop \
+    procps \
+    netcat-openbsd \
+    unzip \
+    zip \
+    # Image processing libraries
+    libmagic1 \
+    libmagic-dev \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    libglib2.0-0 \
+    libprotobuf-dev \
+    protobuf-compiler \
+    # Cleanup
+    && apt-get autoremove -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /tmp/* \
+    && rm -rf /var/tmp/*
+
+# Create non-root user for security
+RUN groupadd -r helix && useradd -r -g helix -d /app -s /bin/bash helix \
+    && mkdir -p /app \
+    && chown -R helix:helix /app
+
+# Dependencies stage - Install Python requirements
+FROM base as dependencies
+
+WORKDIR /app
+
+# Copy and upgrade pip first for better caching
+COPY requirements.txt requirements-helix.txt ./
+RUN pip install --upgrade pip setuptools wheel
+
+# Install base requirements first
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Helix-specific requirements
+RUN pip install --no-cache-dir -r requirements-helix.txt
+
+# Application stage - Copy application code
+FROM dependencies as application
+
+WORKDIR /app
+
+# Copy application code
+COPY litellm/ ./litellm/
+COPY helix/ ./helix/
+COPY config/ ./config/
+COPY docker/scripts/ ./scripts/
+
+# Install LiteLLM in development mode for flexibility
+RUN pip install -e .
+
+# Make scripts executable
+RUN chmod +x scripts/*.sh
+
+# Production stage - Security hardening and optimizations
+FROM base as production
+
+WORKDIR /app
+
+# Copy installed packages from dependencies stage
+COPY --from=dependencies --chown=helix:helix /usr/local/lib/python3.11/site-packages/ /usr/local/lib/python3.11/site-packages/
+COPY --from=dependencies --chown=helix:helix /usr/local/bin/ /usr/local/bin/
+
+# Copy application code
+COPY --from=application --chown=helix:helix /app/litellm/ ./litellm/
+COPY --from=application --chown=helix:helix /app/helix/ ./helix/
+COPY --from=application --chown=helix:helix /app/config/ ./config/
+COPY --from=application --chown=helix:helix /app/scripts/ ./scripts/
+
+# Install production-specific dependencies
+RUN pip install --no-cache-dir \
+    # Production server and optimization
+    gunicorn==21.2.0 \
+    uvicorn[standard]==0.24.0 \
+    orjson==3.9.8 \
+    ciso8601==2.3.0 \
+    # Security and monitoring
+    prometheus-client==0.17.1 \
+    # OpenTelemetry
+    opentelemetry-api==1.19.0 \
+    opentelemetry-sdk==1.19.0 \
+    opentelemetry-instrumentation-fastapi==0.40b0 \
+    opentelemetry-instrumentation-requests==0.40b0 \
+    opentelemetry-instrumentation-logging==0.40b0 \
+    opentelemetry-exporter-otlp==1.19.0 \
+    # Additional security
+    bcrypt==4.0.1 \
+    cryptography==41.0.4
+
+# Create necessary directories with proper permissions
+RUN mkdir -p /app/logs /app/data /app/cache /app/tmp \
+    && chown -R helix:helix /app \
+    && chmod 755 /app/scripts/*.sh
+
+# Health check script
+RUN echo '#!/bin/bash\n\
+curl -f http://localhost:4000/health || exit 1' > /app/healthcheck.sh \
+    && chmod +x /app/healthcheck.sh
+
+# Configure environment
+ENV PYTHONPATH=/app \
+    HELIX_ENVIRONMENT=production \
+    HELIX_LOG_LEVEL=INFO \
+    HELIX_CACHE_DIR=/app/cache \
+    HELIX_LOG_DIR=/app/logs
+
+# Expose ports
+EXPOSE 4000
+
+# Security: Run as non-root user
+USER helix
+
+# Set working directory
+WORKDIR /app
+
+# Health check with proper interval and timeout
+HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
+    CMD /app/healthcheck.sh
+
+# Production command using gunicorn
+CMD ["gunicorn", "--bind", "0.0.0.0:4000", "--workers", "3", "--worker-class", "uvicorn.workers.UvicornWorker", "--timeout", "60", "--keepalive", "10", "--max-requests", "1000", "--max-requests-jitter", "100", "--preload", "--access-logfile", "-", "--error-logfile", "-", "litellm.proxy.proxy_server:app"]
+
+# Labels for metadata
+LABEL maintainer="Helix Team" \
+      version="1.0.0" \
+      description="Helix AI Gateway - Production LiteLLM with caching, PII protection, and monitoring" \
+      org.opencontainers.image.source="https://github.com/your-org/helix" \
+      org.opencontainers.image.licenses="Apache-2.0"

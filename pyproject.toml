@@ -159,6 +159,16 @@ azure-identity = {version = "^1.15.0", python = ">=3.9"}
 requires = ["poetry-core", "wheel"]
 build-backend = "poetry.core.masonry.api"
 
+[dependency-groups]
+dev = [
+    "presidio-analyzer>=2.2.360",
+    "presidio-anonymizer>=2.2.360",
+    "python-dotenv>=1.2.1",
+    "redis>=7.1.0",
+    "sentence-transformers>=5.1.2",
+    "streamlit>=1.51.0",
+]
+
 [tool.commitizen]
 version = "1.80.6"
 version_files = [

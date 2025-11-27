@@ -1,0 +1,156 @@
+# Helix AI Gateway Docker Compose Configuration - Test Version
+# Using different ports to avoid conflicts
+
+version: "3.9"
+
+services:
+  # Enhanced LiteLLM Proxy with Helix features
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: helix-proxy-test
+    command: uvicorn litellm.proxy.proxy_server:app --host 0.0.0.0 --port 4001 --reload
+    ports:
+      - "4001:4001"
+    environment:
+      - LITELLM_CONFIG=/app/config/helix_config.yaml
+      - HELIX_ENABLED=true
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://helix:test_password@postgres:5432/helix
+      - MASTER_KEY=test_master_key_change_in_production
+      - LANGFUSE_PUBLIC_KEY=dummy
+      - LANGFUSE_SECRET_KEY=dummy
+      - LANGFUSE_HOST=dummy
+      - OPENAI_API_KEY=sk-test-key
+      - ANTHROPIC_API_KEY=sk-ant-test-key
+      - GROQ_API_KEY=gsk-test-key
+      - GOOGLE_API_KEY=test-key
+    volumes:
+      - ./litellm/proxy/example_config_yaml:/app/config
+      - ./litellm/proxy/helix_hooks.py:/app/litellm/proxy/helix_hooks.py
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4001/health/liveliness"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - helix-test-network
+
+  # Redis with Redis Stack (includes RedisSearch, RedisJSON)
+  redis:
+    image: redis/redis-stack:latest
+    container_name: helix-redis-test
+    ports:
+      - "6383:6379"
+    volumes:
+      - redis_test_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - helix-test-network
+
+  # PostgreSQL for persistent data (users, configs, logs)
+  postgres:
+    image: postgres:15
+    container_name: helix-postgres-test
+    environment:
+      - POSTGRES_DB=helix
+      - POSTGRES_USER=helix
+      - POSTGRES_PASSWORD=test_password
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    ports:
+      - "5435:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U helix -d helix"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - helix-test-network
+
+  # Helix Dashboard (Streamlit)
+  helix-dashboard:
+    build:
+      context: ./helix/dashboard
+      dockerfile: Dockerfile
+    container_name: helix-dashboard-test
+    command: streamlit run dashboard.py --server.port=8502 --server.address=0.0.0.0 --server.headless=true
+    ports:
+      - "8502:8502"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://helix:test_password@postgres:5432/helix
+      - REFRESH_INTERVAL=5
+    volumes:
+      - ./helix/dashboard/dashboard.py:/app/dashboard.py
+      - ./helix/dashboard/requirements.txt:/app/requirements.txt
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - helix-test-network
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: helix-prometheus-test
+    ports:
+      - "9091:9090"
+    volumes:
+      - prometheus_test_data:/prometheus
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - litellm
+    networks:
+      - helix-test-network
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: helix-grafana-test
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=test_grafana_password
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_test_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - helix-test-network
+
+# Volumes for persistent data
+volumes:
+  redis_test_data:
+    driver: local
+  postgres_test_data:
+    driver: local
+  prometheus_test_data:
+    driver: local
+  grafana_test_data:
+    driver: local
+
+# Network configuration
+networks:
+  helix-test-network:
+    driver: bridge

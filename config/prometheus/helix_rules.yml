@@ -1,0 +1,345 @@
+# Helix AI Gateway Alert Rules
+# Comprehensive monitoring and alerting for critical metrics
+
+groups:
+  - name: helix_availability
+    rules:
+      - alert: HelixAPIDown
+        expr: up{job="helix-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: helix-api
+          team: platform
+        annotations:
+          summary: "Helix API is down"
+          description: "Helix API has been down for more than 1 minute on {{ $labels.instance }}"
+          runbook_url: "https://docs.helix.ai/runbook/api-down"
+
+      - alert: HelixHighErrorRate
+        expr: rate(helix_requests_total{status=~"5.."}[5m]) / rate(helix_requests_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          service: helix-api
+          team: platform
+        annotations:
+          summary: "High error rate in Helix API"
+          description: "Error rate is {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+          runbook_url: "https://docs.helix.ai/runbook/high-error-rate"
+
+      - alert: HelixSlowResponseTime
+        expr: histogram_quantile(0.95, rate(helix_request_duration_seconds_bucket[5m])) > 5
+        for: 3m
+        labels:
+          severity: warning
+          service: helix-api
+          team: platform
+        annotations:
+          summary: "Slow response times in Helix API"
+          description: "95th percentile response time is {{ $value }}s on {{ $labels.instance }}"
+          runbook_url: "https://docs.helix.ai/runbook/slow-response"
+
+  - name: helix_performance
+    rules:
+      - alert: HelixLowCacheHitRate
+        expr: rate(helix_cache_hits_total[5m]) / rate(helix_cache_requests_total[5m]) < 0.3
+        for: 10m
+        labels:
+          severity: warning
+          service: helix-cache
+          team: platform
+        annotations:
+          summary: "Low cache hit rate"
+          description: "Cache hit rate is {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+          runbook_url: "https://docs.helix.ai/runbook/low-cache-hit-rate"
+
+      - alert: HelixHighCostPerRequest
+        expr: rate(helix_cost_usd_total[5m]) / rate(helix_requests_total[5m]) > 0.01
+        for: 15m
+        labels:
+          severity: warning
+          service: helix-costs
+          team: platform
+        annotations:
+          summary: "High cost per request"
+          description: "Cost per request is ${{ $value }} on {{ $labels.instance }}"
+          runbook_url: "https://docs.helix.ai/runbook/high-cost-per-request"
+
+      - alert: HelixMemoryUsageHigh
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          service: helix-infrastructure
+          team: platform
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+          runbook_url: "https://docs.helix.ai/runbook/high-memory-usage"
+
+      - alert: HelixCPUUsageHigh
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: helix-infrastructure
+          team: platform
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value }}% on {{ $labels.instance }}"
+          runbook_url: "https://docs.helix.ai/runbook/high-cpu-usage"
+
+  - name: helix_security
+    rules:
+      - alert: HelixPIIIncidentsSpike
+        expr: rate(helix_pii_incidents_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+          service: helix-security
+          team: security
+        annotations:
+          summary: "Spike in PII incidents detected"
+          description: "{{ $value }} PII incidents per minute on {{ $labels.instance }}"
+          runbook_url: "https://docs.helix.ai/runbook/pii-incidents-spike"
+
+      - alert: HelixUnauthorizedRequests
+        expr: rate(helix_requests_total{status="401"}[5m]) > 0.05
+        for: 3m
+        labels:
+          severity: warning
+          service: helix-security
+          team: security
+        annotations:
+          summary: "High rate of unauthorized requests"
+          description: "{{ $value }} unauthorized requests per second on {{ $labels.instance }}"
+          runbook_url: "https://docs.helix.ai/runbook/unauthorized-requests"
+
+      - alert: HelixRateLimitExceeded
+        expr: rate(helix_rate_limit_exceeded_total[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          service: helix-api
+          team: platform
+        annotations:
+          summary: "Rate limit being exceeded frequently"
+          description: "{{ $value }} rate limit exceeded per second on {{ $labels.instance }}"
+          runbook_url: "https://docs.helix.ai/runbook/rate-limit-exceeded"
+
+  - name: helix_database
+    rules:
+      - alert: HelixDatabaseDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: helix-database
+          team: platform
+        annotations:
+          summary: "PostgreSQL database is down"
+          description: "PostgreSQL database has been down for more than 1 minute on {{ $labels.instance }}"
+          runbook_url: "https://docs.helix.ai/runbook/database-down"
+
+      - alert: HelixDatabaseConnectionsHigh
+        expr: pg_stat_activity_count > 80
+        for: 2m
+        labels:
+          severity: warning
+          service: helix-database
+          team: platform
+        annotations:
+          summary: "High database connection count"
+          description: "{{ $value }} active database connections on {{ $labels.instance }}"
+          runbook_url: "https://docs.helix.ai/runbook/high-db-connections"
+
+      - alert: HelixDatabaseSlowQueries
+        expr: rate(pg_stat_statements_mean_time_seconds[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: helix-database
+          team: platform
+        annotations:
+          summary: "Slow database queries detected"
+          description: "Average query time is {{ $value }}s on {{ $labels.instance }}"
+          runbook_url: "https://docs.helix.ai/runbook/slow-db-queries"
+
+  - name: helix_redis
+    rules:
+      - alert: HelixRedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: helix-redis
+          team: platform
+        annotations:
+          summary: "Redis is down"
+          description: "Redis has been down for more than 1 minute on {{ $labels.instance }}"
+          runbook_url: "https://docs.helix.ai/runbook/redis-down"
+
+      - alert: HelixRedisMemoryHigh
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+        for: 3m
+        labels:
+          severity: critical
+          service: helix-redis
+          team: platform
+        annotations:
+          summary: "Redis memory usage is critically high"
+          description: "Redis memory usage is {{ $value | humanizePercentage }} on {{ $labels.instance }}"
+          runbook_url: "https://docs.helix.ai/runbook/redis-memory-high"
+
+      - alert: HelixRedisEvictionActive
+        expr: rate(redis_evicted_keys_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: helix-redis
+          team: platform
+        annotations:
+          summary: "Redis eviction is active"
+          description: "{{ $value }} keys evicted per second on {{ $labels.instance }}"
+          runbook_url: "https://docs.helix.ai/runbook/redis-eviction"
+
+  - name: helix_costs
+    rules:
+      - alert: HelixDailyBudgetExceeded
+        expr: increase(helix_cost_usd_total[24h]) > 100
+        for: 0m
+        labels:
+          severity: critical
+          service: helix-costs
+          team: finance
+        annotations:
+          summary: "Daily cost budget exceeded"
+          description: "Daily cost is ${{ $value }}, exceeding the $100 budget"
+          runbook_url: "https://docs.helix.ai/runbook/cost-budget-exceeded"
+
+      - alert: HelixWeeklyCostSpike
+        expr: increase(helix_cost_usd_total[7d]) / increase(helix_cost_usd_total[7d] offset 7d) > 2
+        for: 0m
+        labels:
+          severity: warning
+          service: helix-costs
+          team: finance
+        annotations:
+          summary: "Weekly cost has doubled"
+          description: "This week's cost (${{ $value }}) is more than double last week's cost"
+          runbook_url: "https://docs.helix.ai/runbook/cost-spike"
+
+      - alert: HelixUserCostAnomaly
+        expr: increase(helix_cost_usd_total{user_id=~".+"}[24h]) > 10
+        for: 0m
+        labels:
+          severity: warning
+          service: helix-costs
+          team: platform
+        annotations:
+          summary: "User with high daily cost"
+          description: "User {{ $labels.user_id }} has spent ${{ $value }} in the last 24 hours"
+          runbook_url: "https://docs.helix.ai/runbook/user-cost-anomaly"
+
+  - name: helix_llm_providers
+    rules:
+      - alert: HelixProviderHighErrorRate
+        expr: rate(helix_provider_requests_failed_total{provider=~".+"}[5m]) / rate(helix_provider_requests_total{provider=~".+"}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: helix-providers
+          team: platform
+        annotations:
+          summary: "High error rate for LLM provider"
+          description: "Provider {{ $labels.provider }} has {{ $value | humanizePercentage }} error rate"
+          runbook_url: "https://docs.helix.ai/runbook/provider-high-error-rate"
+
+      - alert: HelixProviderSlowResponse
+        expr: histogram_quantile(0.95, rate(helix_provider_request_duration_seconds_bucket{provider=~".+"}[5m])) > 10
+        for: 3m
+        labels:
+          severity: warning
+          service: helix-providers
+          team: platform
+        annotations:
+          summary: "Slow response from LLM provider"
+          description: "Provider {{ $labels.provider }} 95th percentile response time is {{ $value }}s"
+          runbook_url: "https://docs.helix.ai/runbook/provider-slow-response"
+
+      - alert: HelixProviderAPIQuotaExceeded
+        expr: increase(helix_provider_quota_exceeded_total{provider=~".+"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          service: helix-providers
+          team: platform
+        annotations:
+          summary: "API quota exceeded for LLM provider"
+          description: "Provider {{ $labels.provider }} API quota has been exceeded"
+          runbook_url: "https://docs.helix.ai/runbook/provider-quota-exceeded"
+
+  - name: helix_vectors
+    rules:
+      - alert: HelixVectorIndexSizeLarge
+        expr: redis_ft_info{index="idx:semantic",field="num_docs"} > 100000
+        for: 0m
+        labels:
+          severity: info
+          service: helix-vectors
+          team: platform
+        annotations:
+          summary: "Vector index is getting large"
+          description: "Semantic vector index contains {{ $value }} documents"
+          runbook_url: "https://docs.helix.ai/runbook/vector-index-large"
+
+      - alert: HelixVectorSearchSlow
+        expr: histogram_quantile(0.95, rate(helix_vector_search_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: helix-vectors
+          team: platform
+        annotations:
+          summary: "Slow vector search performance"
+          description: "95th percentile vector search time is {{ $value }}s"
+          runbook_url: "https://docs.helix.ai/runbook/vector-search-slow"
+
+  - name: helix_monitoring
+    rules:
+      - alert: HelixPrometheusDown
+        expr: up{job="prometheus"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: helix-monitoring
+          team: platform
+        annotations:
+          summary: "Prometheus is down"
+          description: "Prometheus has been down for more than 1 minute"
+          runbook_url: "https://docs.helix.ai/runbook/prometheus-down"
+
+      - alert: HelixGrafanaDown
+        expr: up{job="grafana"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: helix-monitoring
+          team: platform
+        annotations:
+          summary: "Grafana is down"
+          description: "Grafana has been down for more than 2 minutes"
+          runbook_url: "https://docs.helix.ai/runbook/grafana-down"
+
+      - alert: HelixDashboardDown
+        expr: up{job="helix-dashboard"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: helix-dashboard
+          team: platform
+        annotations:
+          summary: "Helix Dashboard is down"
+          description: "Helix Dashboard has been down for more than 2 minutes"
+          runbook_url: "https://docs.helix.ai/runbook/dashboard-down"

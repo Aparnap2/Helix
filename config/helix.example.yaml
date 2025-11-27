@@ -1,0 +1,689 @@
+# Helix AI Gateway Configuration
+# This configuration extends LiteLLM with Helix-specific features
+
+# =============================================================================
+# LITELLM CORE CONFIGURATION
+# =============================================================================
+# Standard LiteLLM configuration - this should match your existing setup
+model_list:
+  # Example models - replace with your actual model configurations
+  - model_name: "gpt-4"
+    litellm_params:
+      model: "openai/gpt-4"
+      api_base: "https://api.openai.com/v1"
+      api_key: "os.environ/OPENAI_API_KEY"
+      max_tokens: 4096
+      temperature: 0.7
+
+  - model_name: "claude-3-sonnet"
+    litellm_params:
+      model: "anthropic/claude-3-sonnet-20240229"
+      api_key: "os.environ/ANTHROPIC_API_KEY"
+      max_tokens: 4096
+      temperature: 0.7
+
+  - model_name: "gemini-pro"
+    litellm_params:
+      model: "google/gemini-pro"
+      api_key: "os.environ/GOOGLE_API_KEY"
+      max_tokens: 4096
+      temperature: 0.7
+
+# LiteLLM Router Configuration
+router:
+  model_group_alias:
+    "gpt-4-turbo": "gpt-4"
+    "claude-3": "claude-3-sonnet"
+    "gemini": "gemini-pro"
+
+  # Load balancing configuration
+  load_balancing:
+    strategy: "least_utilization"  # "random", "weighted_round_robin", "least_utilization"
+
+  # Fallback configuration
+  fallbacks:
+    - model: "gpt-4"
+      fallbacks:
+        - model: "claude-3-sonnet"
+        - model: "gemini-pro"
+
+# =============================================================================
+# HELIX AI GATEWAY CONFIGURATION
+# =============================================================================
+helix:
+  enabled: true
+
+  # General Settings
+  general:
+    # Models excluded from Helix processing
+    excluded_models: []
+
+    # Global request timeout (seconds)
+    request_timeout: 300
+
+    # Maximum request size for processing (bytes)
+    max_request_size: 10485760  # 10MB
+
+    # Performance monitoring
+    enable_tracing: true
+
+    # Debug mode (enables detailed logging)
+    debug: false
+
+  # =============================================================================
+  # SEMANTIC + EXACT CACHING
+  # =============================================================================
+  caching:
+    enabled: true
+
+    # Cache type: "exact", "semantic", "hybrid"
+    cache_type: "hybrid"
+
+    # Redis Configuration
+    redis:
+      host: "${REDIS_HOST:redis}"
+      port: "${REDIS_PORT:6379}"
+      password: "${REDIS_PASSWORD:}"
+      database: "${REDIS_DB:0}"
+
+      # Redis connection settings
+      max_connections: 100
+      connection_timeout: 10
+      socket_timeout: 10
+
+      # Redis clustering (if enabled)
+      cluster_enabled: false
+      cluster_nodes: []
+
+    # Vector Search Configuration (for semantic caching)
+    vector_search:
+      enabled: true
+
+      # Embedding model for semantic search
+      embedding_model: "text-embedding-3-small"
+      embedding_provider: "openai"
+
+      # Vector index configuration
+      index_name: "helix_semantic_cache"
+      similarity_threshold: 0.85
+      distance_metric: "cosine"  # "cosine", "euclidean", "dot_product"
+
+      # HNSW index parameters
+      hnsw:
+        m: 16  # Number of connections per layer
+        ef_construction: 200  # Index building accuracy
+        ef_runtime: 50  # Search accuracy
+
+      # Vector dimensions (model-specific)
+      dimensions: 1536  # OpenAI text-embedding-3-small
+
+    # Cache TTL and Limits
+    default_ttl: 3600  # seconds (1 hour)
+    max_ttl: 86400     # seconds (24 hours)
+    max_cache_size: 1000000  # maximum cached entries
+    max_memory_usage: 4294967296  # 4GB in bytes
+
+    # Content-based caching
+    content_based_caching:
+      enabled: true
+      min_content_length: 50
+      max_content_length: 50000
+
+    # Cache optimization
+    optimization:
+      # Compress cached responses
+      compression: true
+      compression_algorithm: "gzip"
+
+      # Batch cache operations
+      batch_size: 100
+      batch_timeout: 5  # seconds
+
+      # Cache warming
+      warm_cache: false
+      warm_cache_queries: []
+
+    # Cache analytics
+    analytics:
+      track_popular_queries: true
+      track_cache_miss_reasons: true
+      performance_tracking: true
+
+    # Models that should be cached
+    cacheable_models:
+      - "gpt-4"
+      - "claude-3-sonnet"
+      - "gemini-pro"
+
+    # Models that should NOT be cached
+    excluded_cache_models:
+      - "gpt-4-turbo-preview"  # Frequently updated model
+
+  # =============================================================================
+  # PII DETECTION & REDACTION
+  # =============================================================================
+  pii:
+    enabled: true
+
+    # Detection mode: "detect_only", "redact", "audit_only"
+    mode: "redact"
+
+    # Microsoft Presidio Configuration
+    presidio:
+      # Default recognizers to enable
+      recognizers:
+        - "EMAIL_ADDRESS"
+        - "PHONE_NUMBER"
+        - "US_SSN"
+        - "CREDIT_CARD"
+        - "IBAN_CODE"
+        - "IP_ADDRESS"
+        - "URL"
+        - "LOCATION"
+        - "PERSON"
+        - "NRP"  # Nationality, Religious, Political
+
+      # Confidence threshold for PII detection
+      confidence_threshold: 0.8
+
+      # Redaction settings
+      redaction:
+        # Redaction method: "replace", "mask", "hash", "encrypt"
+        default_method: "replace"
+
+        # Replacement text
+        replacement_text: "[REDACTED]"
+
+        # Masking pattern
+        mask_char: "*"
+
+        # Number of characters to keep when masking
+        mask_keep_chars: 4
+
+      # Performance settings
+      max_processing_time_ms: 5000  # Maximum time for PII processing
+      max_text_length: 100000       # Maximum text length to process
+
+      # Language settings
+      languages: ["en"]
+
+      # Advanced settings
+      analyze_only_first_n_chars: 10000  # For performance optimization
+      return_decision_process: false     # Debug mode
+
+    # Custom Recognizers
+    custom_recognizers:
+      - name: "api_key"
+        pattern: "[A-Za-z0-9]{32,64}"
+        entity_type: "API_KEY"
+        confidence_level: 0.9
+        context_keywords: ["api", "key", "token", "secret"]
+
+      - name: "database_connection_string"
+        pattern: "postgresql://[^\s]+"
+        entity_type: "DATABASE_CONNECTION"
+        confidence_level: 0.95
+
+      - name: "jwt_token"
+        pattern: "eyJ[A-Za-z0-9_-]*\\.eyJ[A-Za-z0-9_-]*\\.[A-Za-z0-9_-]*"
+        entity_type: "JWT_TOKEN"
+        confidence_level: 0.95
+
+    # Detection Strategies
+    strategies:
+      # Process streaming requests
+      stream_processing: true
+
+      # Batch processing for multiple messages
+      batch_processing: true
+      batch_size: 10
+
+      # Adaptive confidence (adjust based on context)
+      adaptive_confidence: true
+
+    # Audit and Logging
+    audit:
+      log_all_detections: true
+      log_original_content: false  # Security: don't log original PII
+      log_detection_time: true
+      retention_days: 90
+
+    # Performance Optimization
+    optimization:
+      # Cache PII detection results
+      cache_detection_results: true
+      cache_ttl: 3600  # seconds
+
+      # Use regex for simple patterns first
+      fast_regex_first: true
+
+      # Limit concurrent PII processing
+      max_concurrent_detections: 100
+
+  # =============================================================================
+  # COST OPTIMIZATION & BUDGET MANAGEMENT
+  # =============================================================================
+  cost:
+    enabled: true
+
+    # Real-time cost tracking
+    real_time_tracking: true
+
+    # Budget Management
+    budget_management:
+      enabled: true
+
+      # Default budgets
+      default_daily_budget: 1000.0    # USD
+      default_monthly_budget: 30000.0 # USD
+
+      # Alert thresholds (percentage of budget)
+      alert_thresholds:
+        warning: 70    # Warn at 70% of budget
+        critical: 90   # Critical alert at 90% of budget
+        blocked: 100   # Block requests at 100% of budget
+
+      # Budget reset schedule
+      reset_schedule:
+        daily: "0 0 * * *"      # Midnight every day
+        monthly: "0 0 1 * *"    # First day of every month
+
+    # Cost Optimization Strategies
+    optimization:
+      enabled: true
+
+      # Cache-first strategy
+      cache_first: true
+
+      # Model swapping for cost savings
+      model_swapping:
+        enabled: true
+
+        # Swap rules (cheaper alternatives)
+        swap_rules:
+          - original: "gpt-4-turbo"
+            alternatives: ["gpt-4", "claude-3-sonnet"]
+            max_token_ratio: 1.2  # Allow 20% more tokens
+
+          - original: "claude-3-opus"
+            alternatives: ["claude-3-sonnet", "gpt-4"]
+            max_token_ratio: 1.1
+
+        # Cost sensitivity (how much to prioritize cost over quality)
+        cost_sensitivity: 0.5  # 0.0 = quality first, 1.0 = cost first
+
+      # Prompt optimization
+      prompt_optimization:
+        enabled: true
+
+        # Reduce prompt size for cost savings
+        size_optimization:
+          enabled: true
+          max_reduction_percent: 20  # Maximum prompt size reduction
+
+        # Remove redundant context
+        context_pruning:
+          enabled: true
+          similarity_threshold: 0.9
+
+    # Pricing Configuration
+    pricing:
+      # Update pricing periodically
+      price_update_interval: 3600  # seconds
+
+      # Pricing source
+      price_source: "database"  # "database", "api", "file"
+
+      # Custom pricing overrides
+      custom_pricing:
+        "gpt-4":
+          input_cost_per_million: 30.0
+          output_cost_per_million: 60.0
+        "claude-3-sonnet":
+          input_cost_per_million: 3.0
+          output_cost_per_million: 15.0
+
+    # Cost Analytics
+    analytics:
+      enabled: true
+
+      # Analytics retention
+      retention_days: 365
+
+      # Granularity
+      granularity: ["hour", "day", "week", "month"]
+
+      # Dimensions for analysis
+      dimensions:
+        - "model"
+        - "user"
+        - "organization"
+        - "team"
+        - "endpoint"
+
+    # Notification Settings
+    notifications:
+      # Budget alerts
+      budget_alerts:
+        enabled: true
+        channels: ["email", "slack"]
+
+      # Cost anomaly detection
+      anomaly_detection:
+        enabled: true
+        threshold_multiplier: 2.0  # Alert if cost is 2x normal
+
+      # Daily/weekly cost reports
+        scheduled_reports:
+          enabled: true
+          daily_report: true
+          weekly_report: true
+
+  # =============================================================================
+  # MONITORING & PERFORMANCE
+  # =============================================================================
+  monitoring:
+    enabled: true
+
+    # Metrics Collection
+    metrics:
+      # Collection interval (seconds)
+      collection_interval: 60
+
+      # Metrics to collect
+      metrics_to_collect:
+        - "request_count"
+        - "success_rate"
+        - "average_latency"
+        - "cache_hit_rate"
+        - "pii_detection_rate"
+        - "cost_per_request"
+        - "savings_rate"
+
+      # Performance metrics
+      performance_metrics:
+        enabled: true
+        percentiles: [50, 90, 95, 99]  # Latency percentiles
+        error_rate_window: 300          # 5 minutes
+
+      # Resource metrics
+      resource_metrics:
+        enabled: true
+        memory_usage: true
+        cpu_usage: true
+        disk_usage: true
+
+    # Alerting
+    alerting:
+      enabled: true
+
+      # Performance alerts
+      performance_alerts:
+        # Alert if average latency exceeds threshold
+        high_latency_threshold: 5000  # milliseconds
+
+        # Alert if success rate drops below threshold
+        low_success_rate_threshold: 95  # percentage
+
+        # Alert if error rate spikes
+        high_error_rate_threshold: 5    # percentage
+
+      # Cache alerts
+      cache_alerts:
+        low_cache_hit_rate_threshold: 50  # percentage
+        high_cache_memory_usage_threshold: 80  # percentage
+
+      # Cost alerts
+      cost_alerts:
+        # Daily spending spike
+        daily_spend_spike_threshold: 2.0  # multiplier
+
+        # Unusual model usage
+        model_usage_anomaly_threshold: 3.0  # multiplier
+
+    # Integration with monitoring systems
+    integrations:
+      # Prometheus metrics
+      prometheus:
+        enabled: true
+        port: 9090
+        endpoint: "/metrics"
+
+      # OpenTelemetry
+      opentelemetry:
+        enabled: true
+        endpoint: "http://localhost:4317"
+
+      # Grafana dashboard
+      grafana:
+        enabled: true
+        dashboard_url: "http://localhost:3000"
+
+    # Dashboard Configuration
+    dashboard:
+      enabled: true
+
+      # Streamlit dashboard
+      streamlit:
+        port: 8501
+        host: "0.0.0.0"
+
+      # Dashboard refresh interval (seconds)
+      refresh_interval: 30
+
+      # Data retention for dashboard
+      dashboard_retention_days: 30
+
+    # Health Checks
+    health_checks:
+      enabled: true
+      interval: 30  # seconds
+
+      # Component health checks
+      components:
+        redis: true
+        database: true
+        pii_processor: true
+        cache: true
+
+    # Performance Optimization
+    optimization:
+      # Connection pooling
+      connection_pooling:
+        enabled: true
+        max_connections: 100
+
+      # Request batching
+      request_batching:
+        enabled: true
+        batch_size: 10
+        batch_timeout: 5  # seconds
+
+      # Caching strategy
+      caching_strategy: "write_behind"  # "write_through", "write_behind", "write_around"
+
+  # =============================================================================
+  # COMPLIANCE & SECURITY
+  # =============================================================================
+  compliance:
+    # GDPR compliance
+    gdpr:
+      enabled: true
+      data_retention_days: 30
+      right_to_erasure: true
+
+    # HIPAA compliance (if applicable)
+    hipaa:
+      enabled: false
+      audit_logging: true
+      encryption_at_rest: true
+
+    # SOC 2 compliance
+    soc2:
+      enabled: true
+      audit_logging: true
+      access_control: true
+
+    # Data residency
+    data_residency:
+      enabled: false
+      allowed_regions: []
+
+    # Audit logging
+    audit_logging:
+      enabled: true
+      log_all_requests: true
+      log_changes: true
+      retention_days: 2555  # 7 years
+
+  # =============================================================================
+  # EXPERIMENTAL FEATURES
+  # =============================================================================
+  experimental:
+    # Enable experimental features
+    enabled: false
+
+    # Features to enable
+    features:
+      - "adaptive_cache_ttl"
+      - "machine_learning_pii_detection"
+      - "predictive_cost_optimization"
+      - "auto_model_selection"
+
+# =============================================================================
+# LITELLM INTEGRATION
+# =============================================================================
+# Enable Helix as a callback in LiteLLM
+callbacks:
+  - "helix"
+
+# Add Helix-specific environment variables
+environment_variables:
+  HELIX_ENABLED: "true"
+  HELIX_CONFIG_PATH: "/app/config/helix.yaml"
+  HELIX_LOG_LEVEL: "INFO"
+
+# =============================================================================
+# DATABASE CONFIGURATION
+# =============================================================================
+# Extend LiteLLM database configuration with Helix tables
+database:
+  # Helix-specific database settings
+  helix_schema_migration: true
+
+  # Connection pooling
+  pool_size: 20
+  max_overflow: 30
+
+  # Connection timeout
+  connection_timeout: 30
+
+  # Statement timeout
+  statement_timeout: 60000  # milliseconds
+
+# =============================================================================
+# LOGGING CONFIGURATION
+# =============================================================================
+logging:
+  # Helix-specific logging
+  helix_logging:
+    level: "INFO"
+    format: "json"
+
+    # Log destinations
+    destinations:
+      - "file"
+      - "console"
+
+    # Log file settings
+    file_settings:
+      path: "/var/log/helix/app.log"
+      max_size: "100MB"
+      backup_count: 10
+
+    # Structured logging fields
+    structured_fields:
+      - "request_id"
+      - "user_id"
+      - "model"
+      - "cache_hit"
+      - "pii_detected"
+      - "processing_time_ms"
+      - "cost"
+
+# =============================================================================
+# SECURITY CONFIGURATION
+# =============================================================================
+security:
+  # Rate limiting
+  rate_limiting:
+    enabled: true
+    default_limits:
+      requests_per_minute: 100
+      requests_per_hour: 1000
+
+  # API key security
+  api_keys:
+    # Require API key for all requests
+    required: true
+
+    # API key permissions
+    permissions:
+      caching: ["admin", "user"]
+      pii: ["admin", "user"]
+      cost_optimization: ["admin", "user"]
+      monitoring: ["admin", "user"]
+
+  # Encryption
+  encryption:
+    # Encrypt sensitive data at rest
+    at_rest: true
+
+    # Encrypt data in transit
+    in_transit: true
+
+    # Encryption key management
+    key_management: "external"  # "external", "internal"
+
+  # Access control
+  access_control:
+    # Role-based access control
+    rbac: true
+
+    # Roles
+    roles:
+      admin:
+        permissions: ["*"]
+      user:
+        permissions: ["read", "write"]
+      viewer:
+        permissions: ["read"]
+
+# =============================================================================
+# DEVELOPMENT CONFIGURATION
+# =============================================================================
+development:
+  # Enable development mode
+  enabled: false
+
+  # Debug settings
+  debug:
+    # Enable debug logging
+    logging: true
+
+    # Enable debug endpoints
+    endpoints: true
+
+    # Enable hot reload
+    hot_reload: true
+
+  # Testing
+  testing:
+    # Enable test mode
+    enabled: false
+
+    # Mock external services
+    mock_services: true
+
+    # Test data
+    test_data_path: "/app/tests/data"

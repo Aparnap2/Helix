@@ -1,0 +1,95 @@
+# Grafana Datasources Configuration
+# Auto-provision datasources for Helix monitoring
+
+apiVersion: 1
+
+datasources:
+  # Prometheus as primary datasource
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: "15s"
+      queryTimeout: "60s"
+      httpMethod: POST
+      manageAlerts: true
+      prometheusType: Prometheus
+      prometheusVersion: "2.45.0"
+      cacheLevel: "High"
+      disableRecordingRules: false
+      incrementalQueryOverlapWindow: "10m"
+      exemplarTraceIdDestinations:
+        - datasourceUid: tempo
+          name: traceID
+    secureJsonData: {}
+
+  # Redis as datasource for cache metrics
+  - name: Redis
+    type: redis-datasource
+    access: proxy
+    url: redis://:your-redis-password@redis:6379
+    database: 0
+    editable: true
+    jsonData:
+      client: standalone
+      sentinelName: ""
+      sentinelMaster: ""
+      poolSize: 5
+      timeout: 10
+      pingInterval: 30
+      tlsSkipVerify: true
+    secureJsonData:
+      password: your-redis-password
+
+  # PostgreSQL as datasource for business metrics
+  - name: PostgreSQL
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    database: helix
+    user: helix
+    editable: true
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1500
+      timescaledb: false
+    secureJsonData:
+      password: your-postgres-password
+
+  # Loki for logs
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: true
+    jsonData:
+      maxLines: 1000
+      derivedFields:
+        - datasourceUid: tempo
+          matcherRegex: "traceID=(\\w+)"
+          name: TraceID
+          url: "$${__value.raw}"
+          urlDisplayLabel: "View Trace"
+
+  # Tempo for distributed tracing
+  - name: Tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: true
+    jsonData:
+      httpMethod: GET
+      tracesToLogs:
+        datasourceUid: loki
+        tags: ['job', 'instance', 'pod', 'namespace']
+        mappedTags: [
+          { key: 'service.name', value: 'job' }
+        ]
+        mapTagNamesEnabled: false
+        spanStartTimeShift: '1h'
+        spanEndTimeShift: '1h'
+        filterByTraceID: false
+        filterBySpanID: false

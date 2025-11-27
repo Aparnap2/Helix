@@ -1,0 +1,79 @@
+# Helix Development Configuration
+# Streamlined configuration for development and testing
+
+helix:
+  enabled: true
+
+  general:
+    debug: true
+    request_timeout: 60
+    max_request_size: 1048576  # 1MB for development
+
+  caching:
+    enabled: true
+    cache_type: "hybrid"
+    default_ttl: 300  # 5 minutes for development
+    cacheable_models: ["gpt-4", "claude-3-sonnet", "gemini-pro"]
+
+    redis:
+      host: "localhost"
+      port: 6379
+      password: ""
+      database: 1  # Separate database for development
+
+    vector_search:
+      enabled: true
+      embedding_model: "text-embedding-3-small"
+      similarity_threshold: 0.8  # Lower threshold for more cache hits
+
+  pii:
+    enabled: true
+    mode: "redact"  # Full redaction in development
+
+    presidio:
+      recognizers: ["EMAIL_ADDRESS", "PHONE_NUMBER", "US_SSN"]
+      confidence_threshold: 0.7  # Lower threshold for testing
+
+  cost:
+    enabled: true
+    real_time_tracking: true
+
+    budget_management:
+      enabled: true
+      default_daily_budget: 50.0
+      alert_thresholds:
+        warning: 60
+        critical: 80
+
+    optimization:
+      enabled: true
+      cache_first: true
+
+  monitoring:
+    enabled: true
+    metrics:
+      collection_interval: 30  # More frequent collection in dev
+
+    alerting:
+      enabled: false  # Disable alerts in development
+
+    dashboard:
+      enabled: true
+      streamlit:
+        port: 8502  # Different port for development
+
+development:
+  enabled: true
+  debug:
+    logging: true
+    endpoints: true
+    hot_reload: true
+
+logging:
+  helix_logging:
+    level: "DEBUG"
+    destinations: ["console", "file"]
+    file_settings:
+      path: "./logs/helix-dev.log"
+      max_size: "50MB"
+      backup_count: 5

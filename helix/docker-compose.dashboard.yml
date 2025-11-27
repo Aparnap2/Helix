@@ -1,0 +1,46 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis/redis-stack:latest
+    container_name: helix_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis/helix_init.redis:/docker-entrypoint-initdb.d/init.redis
+    command: redis-server --appendonly yes
+    networks:
+      - helix_network
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/dashboard.Dockerfile
+    container_name: helix_dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - REFRESH_INTERVAL=5
+      - THEME=dark
+      - ENABLE_EXPORTS=true
+      - ENABLE_ALERTS=true
+    volumes:
+      - ./helix/dashboard:/app
+      - dashboard_logs:/app/logs
+    depends_on:
+      - redis
+    networks:
+      - helix_network
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+    driver: local
+  dashboard_logs:
+    driver: local
+
+networks:
+  helix_network:
+    driver: bridge

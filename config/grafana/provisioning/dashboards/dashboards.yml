@@ -1,0 +1,49 @@
+# Grafana Dashboards Configuration
+# Auto-provision dashboards for Helix monitoring
+
+apiVersion: 1
+
+providers:
+  # Helix dashboard provider
+  - name: 'helix-dashboards'
+    orgId: 1
+    folder: 'Helix AI Gateway'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/helix
+
+  # System monitoring dashboards
+  - name: 'system-dashboards'
+    orgId: 1
+    folder: 'System Monitoring'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/system
+
+  # Performance dashboards
+  - name: 'performance-dashboards'
+    orgId: 1
+    folder: 'Performance Analysis'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/performance
+
+  # Security dashboards
+  - name: 'security-dashboards'
+    orgId: 1
+    folder: 'Security & Compliance'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 60
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/security

@@ -1,0 +1,613 @@
+// Helix AI Gateway - Database Schema Extensions
+// This file extends the base LiteLLM schema with Helix-specific features
+
+// Import base schema - this would be merged with the existing LiteLLM schema
+
+// Helix Cache Performance Metrics
+model HelixCacheMetrics {
+  id              String   @id @default(uuid())
+  cache_key       String   @unique
+  cache_type      String   // "semantic", "exact", "hybrid"
+  hit_count       BigInt   @default(0)
+  miss_count      BigInt   @default(0)
+  hit_rate        Float    @default(0.0)
+  avg_lookup_time Float    @default(0.0) // milliseconds
+  total_tokens_saved BigInt @default(0)
+  cost_savings    Float    @default(0.0)
+  last_access     DateTime @default(now())
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  // Metadata for cache entries
+  model_name      String?
+  request_hash    String?
+  similarity_score Float?  // For semantic cache hits
+  ttl_seconds     Int?
+
+  // Relations
+  helix_requests   HelixRequestLog[]
+
+  @@map("helix_cache_metrics")
+  @@index([cache_type])
+  @@index([hit_rate])
+  @@index([last_access])
+}
+
+// Helix PII Detection and Redaction Logs
+model HelixPIIDetectionLog {
+  id                String   @id @default(uuid())
+  request_id        String   @unique
+  original_text_hash String  @unique // Hash of original text for audit
+
+  // PII Detection Results
+  pii_entities      Json     // Detected PII entities with types and positions
+  pii_count         Int      @default(0)
+  pii_types         String[] // Array of PII types detected
+  avg_confidence    Float    @default(0.0)
+
+  // Redaction Information
+  redaction_method  String?  // "replace", "mask", "hash", "encrypt"
+  redaction_applied Boolean  @default(false)
+  redaction_time_ms Int      @default(0)
+
+  // Processing Metrics
+  total_processing_time_ms Int @default(0)
+  text_length       Int      @default(0)
+  pii_density       Float    @default(0.0) // PII characters / total characters
+
+  // Model Information
+  analyzer_version  String?
+  recognizers_used  String[]
+  custom_recognizers String[]
+
+  // Audit Trail
+  created_at        DateTime @default(now())
+  created_by        String?
+
+  // Relations
+  helix_request     HelixRequestLog?
+
+  @@map("helix_pii_detection_logs")
+  @@index([request_id])
+  @@index([redaction_applied])
+  @@index([pii_count])
+  @@index([created_at])
+}
+
+// Helix Cost Tracking and Optimization
+model HelixCostTracking {
+  id                  String   @id @default(uuid())
+  request_id          String   @unique
+
+  // Request Information
+  model_name          String
+  provider            String?  // "openai", "anthropic", etc.
+  endpoint            String?
+
+  // Token Usage
+  input_tokens        BigInt?
+  output_tokens       BigInt?
+  total_tokens        BigInt?
+  cached_tokens       BigInt? @default(0)
+
+  // Cost Calculation
+  original_cost       Float    // Cost without Helix optimizations
+  actual_cost         Float    // Actual cost with optimizations
+  cache_savings       Float    @default(0.0)
+  optimization_savings Float   @default(0.0)
+  total_savings       Float    @default(0.0)
+  savings_rate        Float    @default(0.0) // Percentage saved
+
+  // Cost Breakdown
+  input_cost          Float    @default(0.0)
+  output_cost         Float    @default(0.0)
+  cache_cost          Float    @default(0.0)
+
+  // Pricing Information
+  price_per_mil_input Float?
+  price_per_mil_output Float?
+  currency            String   @default("USD")
+
+  // Budget Information
+  budget_id           String?
+  organization_id     String?
+  team_id             String?
+  user_id             String?
+
+  // Performance Metrics
+  latency_ms          Int?
+  cache_lookup_time_ms Int?
+  processing_overhead_ms Int?
+
+  // Optimization Details
+  optimization_strategy String? // "cache_hit", "model_swap", "prompt_optimization"
+  alternative_model   String? // If model was swapped for optimization
+
+  // Timestamps
+  created_at          DateTime @default(now())
+
+  // Relations
+  helix_request       HelixRequestLog?
+  helix_budget        HelixBudget? @relation(fields: [budget_id], references: [id])
+
+  @@map("helix_cost_tracking")
+  @@index([request_id])
+  @@index([model_name])
+  @@index([organization_id])
+  @@index([team_id])
+  @@index([user_id])
+  @@index([created_at])
+  @@index([savings_rate])
+}
+
+// Helix Enhanced Budget Management
+model HelixBudget {
+  id                    String   @id @default(uuid())
+
+  // Basic Budget Info
+  name                  String
+  description           String?
+  type                  String   // "monthly", "quarterly", "yearly", "per_project"
+
+  // Budget Limits
+  max_budget            Float
+  soft_budget           Float?  // Warning threshold
+  daily_limit           Float?  // Daily spending limit
+  per_request_limit     Float?  // Maximum per request
+
+  // Budget Tracking
+  current_spend         Float    @default(0.0)
+  forecasted_spend      Float    @default(0.0)
+  cache_savings         Float    @default(0.0)
+  optimization_savings  Float    @default(0.0)
+
+  // Budget Period
+  start_date            DateTime
+  end_date              DateTime
+  reset_date            DateTime?
+
+  // Cost Breakdown
+  model_spend           Json     @default("{}") // Spend by model
+  provider_spend        Json     @default("{}") // Spend by provider
+  daily_spend           Json     @default("{}") // Daily spend breakdown
+
+  // Controls
+  auto_block_on_limit   Boolean  @default(false)
+  alert_thresholds      Json     @default("{}") // Percentage-based alerts
+
+  // Relations
+  organization_id       String?  @unique
+  team_id               String?  @unique
+  user_id               String?  @unique
+
+  cost_trackings        HelixCostTracking[]
+  budget_alerts         HelixBudgetAlert[]
+
+  // Metadata
+  created_at            DateTime @default(now())
+  created_by            String?
+  updated_at            DateTime @updatedAt
+  updated_by            String?
+
+  @@map("helix_budgets")
+  @@index([organization_id])
+  @@index([team_id])
+  @@index([user_id])
+  @@index([start_date])
+  @@index([end_date])
+}
+
+// Helix Budget Alerting
+model HelixBudgetAlert {
+  id                    String   @id @default(uuid())
+  budget_id             String
+
+  // Alert Configuration
+  alert_type            String   // "percentage", "absolute", "forecast"
+  threshold_value       Float
+  trigger_condition     String   // "greater_than", "equal_to", "less_than"
+
+  // Alert Status
+  is_active             Boolean  @default(true)
+  last_triggered        DateTime?
+  trigger_count         Int      @default(0)
+
+  // Alert Methods
+  email_enabled         Boolean  @default(false)
+  email_recipients      String[]
+  slack_enabled         Boolean  @default(false)
+  slack_webhook         String?
+  webhook_enabled       Boolean  @default(false)
+  webhook_url           String?
+
+  // Alert Message Templates
+  email_template        String?
+  slack_template        String?
+  webhook_template      String?
+
+  // Relations
+  budget                HelixBudget @relation(fields: [budget_id], references: [id])
+
+  // Metadata
+  created_at            DateTime @default(now())
+  created_by            String?
+  updated_at            DateTime @updatedAt
+  updated_by            String?
+
+  @@map("helix_budget_alerts")
+  @@index([budget_id])
+  @@index([is_active])
+}
+
+// Helix Central Request Log (Enhanced with Helix features)
+model HelixRequestLog {
+  id                    String   @id @default(uuid())
+
+  // Request Identification
+  request_hash          String   @unique
+  trace_id              String?  // For distributed tracing
+  correlation_id        String?  // For related requests
+
+  // Authentication & Authorization
+  api_key               String?
+  user_id               String?
+  team_id               String?
+  organization_id       String?
+
+  // Request Details
+  endpoint              String
+  method                String
+  model_name            String
+  provider              String?
+
+  // Request Content (Sanitized)
+  request_summary       String?  // Hashed/redacted summary
+  input_length          Int?
+  output_length         Int?
+
+  // Performance Metrics
+  latency_ms            Int
+  cache_lookup_time_ms  Int?
+  pii_processing_time_ms Int?
+  total_processing_time_ms Int?
+
+  // Cache Information
+  cache_hit             Boolean  @default(false)
+  cache_type            String?  // "exact", "semantic", "hybrid"
+  cache_similarity      Float?   // For semantic cache hits
+
+  // PII Information
+  pii_detected          Boolean  @default(false)
+  pii_count             Int      @default(0)
+  pii_redaction_applied Boolean  @default(false)
+
+  // Request Outcome
+  success               Boolean
+  error_code            String?
+  error_message         String?
+  response_code         Int?
+
+  // Quality Metrics
+  response_quality_score Float?
+  user_satisfaction     Float?  // If tracked
+
+  // Flags and Labels
+  flags                 String[] @default([])
+  tags                  String[] @default([])
+
+  // Environment
+  environment           String?  // "production", "staging", "development"
+  region                String?
+
+  // Relations
+  cache_metrics         HelixCacheMetrics[]
+  pii_detection         HelixPIIDetectionLog?
+  cost_tracking         HelixCostTracking?
+
+  // Timestamps
+  created_at            DateTime @default(now())
+  started_at            DateTime?
+  completed_at          DateTime?
+
+  @@map("helix_request_logs")
+  @@index([request_hash])
+  @@index([api_key])
+  @@index([user_id])
+  @@index([team_id])
+  @@index([organization_id])
+  @@index([model_name])
+  @@index([success])
+  @@index([cache_hit])
+  @@index([pii_detected])
+  @@index([created_at])
+  @@index([trace_id])
+}
+
+// Helix Semantic Cache Index Configuration
+model HelixSemanticCacheConfig {
+  id                    String   @id @default(uuid())
+
+  // Index Configuration
+  index_name            String   @unique
+  embedding_model       String   // "text-embedding-ada-002", etc.
+  dimension             Int
+  similarity_metric     String   // "cosine", "euclidean", "dot_product"
+  similarity_threshold  Float    @default(0.85)
+
+  // Index Parameters
+  m_parameter           Int?     // HNSW m parameter
+  ef_construction       Int?     // HNSW ef_construction
+  ef_runtime            Int?     // HNSW ef_runtime
+  max_elements          Int?
+
+  // Cache Configuration
+  default_ttl           Int      @default(3600)
+  max_cache_size        BigInt?
+  eviction_policy       String   @default("lru")
+
+  // Status
+  is_active             Boolean  @default(true)
+  index_size            BigInt?  @default(0)
+  total_cached_requests BigInt?  @default(0)
+
+  // Performance Metrics
+  avg_similarity        Float?   @default(0.0)
+  avg_lookup_time_ms    Float?   @default(0.0)
+  hit_rate              Float?   @default(0.0)
+
+  // Relations
+  cache_metrics         HelixCacheMetrics[]
+
+  // Metadata
+  created_at            DateTime @default(now())
+  created_by            String?
+  updated_at            DateTime @updatedAt
+  updated_by            String?
+
+  @@map("helix_semantic_cache_configs")
+  @@index([index_name])
+  @@index([is_active])
+}
+
+// Helix Custom PII Recognizers
+model HelixCustomPIIRecognizer {
+  id                    String   @id @default(uuid())
+
+  // Recognizer Configuration
+  name                  String   @unique
+  description           String?
+  entity_type           String   // Custom PII entity type
+  pattern               String   // Regex pattern
+  confidence_level      Float    @default(0.8)
+
+  // Recognizer Parameters
+  case_sensitive        Boolean  @default(false)
+  min_word_length       Int?
+  max_word_length       Int?
+  context_keywords      String[]
+  exclusion_keywords    String[]
+
+  // Advanced Configuration
+  machine_learning_model String? // For ML-based recognizers
+  model_threshold       Float?
+  training_data_path    String?
+
+  // Status and Metrics
+  is_active             Boolean  @default(true)
+  detection_count       BigInt   @default(0)
+  false_positive_count  BigInt   @default(0)
+  accuracy_rate         Float?   @default(0.0)
+
+  // Usage
+  organizations          String[] // Organizations that can use this
+  teams                 String[] // Teams that can use this
+
+  // Metadata
+  created_at            DateTime @default(now())
+  created_by            String?
+  updated_at            DateTime @updatedAt
+  updated_by            String?
+
+  @@map("helix_custom_pii_recognizers")
+  @@index([name])
+  @@index([entity_type])
+  @@index([is_active])
+}
+
+// Helix Performance Monitoring
+model HelixPerformanceMetrics {
+  id                    String   @id @default(uuid())
+
+  // Time Window
+  timestamp             DateTime @default(now())
+  time_window           String   // "1m", "5m", "15m", "1h", "1d"
+
+  // Request Metrics
+  total_requests        BigInt   @default(0)
+  successful_requests   BigInt   @default(0)
+  failed_requests       BigInt   @default(0)
+  success_rate          Float    @default(0.0)
+
+  // Cache Metrics
+  cache_hits            BigInt   @default(0)
+  cache_misses          BigInt   @default(0)
+  cache_hit_rate        Float    @default(0.0)
+  avg_cache_lookup_ms   Float    @default(0.0)
+
+  // PII Metrics
+  pii_detection_count   BigInt   @default(0)
+  pii_redaction_count   BigInt   @default(0)
+  avg_pii_processing_ms Float    @default(0.0)
+
+  // Cost Metrics
+  total_cost            Float    @default(0.0)
+  cache_savings         Float    @default(0.0)
+  optimization_savings  Float    @default(0.0)
+  avg_cost_per_request  Float    @default(0.0)
+
+  // Performance Metrics
+  avg_latency_ms        Float    @default(0.0)
+  p50_latency_ms        Float    @default(0.0)
+  p95_latency_ms        Float    @default(0.0)
+  p99_latency_ms        Float    @default(0.0)
+
+  // Model Breakdown
+  model_metrics         Json     @default("{}") // Metrics by model
+  organization_metrics  Json     @default("{}") // Metrics by organization
+
+  // Indexes for efficient querying
+  @@index([timestamp])
+  @@index([time_window])
+  @@index([success_rate])
+  @@index([cache_hit_rate])
+
+  @@map("helix_performance_metrics")
+}
+
+// Helix System Configuration
+model HelixSystemConfig {
+  id                    String   @id @default(uuid())
+
+  // Configuration Key-Value pairs
+  config_key            String   @unique
+  config_value          Json
+  config_type           String   // "string", "number", "boolean", "object", "array"
+
+  // Configuration Metadata
+  description           String?
+  category              String?  // "caching", "pii", "cost", "monitoring"
+  is_sensitive          Boolean  @default(false)
+
+  // Environment-specific values
+  environment_overrides Json     @default("{}") // {"production": "...", "staging": "..."}
+
+  // Validation Rules
+  validation_rules      Json?    // JSON schema for validation
+  allowed_values        String[]?
+
+  // Access Control
+  read_roles            String[] @default([])
+  write_roles           String[] @default([])
+
+  // Audit Trail
+  created_at            DateTime @default(now())
+  created_by            String?
+  updated_at            DateTime @updatedAt
+  updated_by            String?
+
+  @@map("helix_system_config")
+  @@index([config_key])
+  @@index([category])
+}
+
+// Helix Audit Log for Compliance
+model HelixAuditLog {
+  id                    String   @id @default(uuid())
+
+  // Event Information
+  event_type            String   // "config_change", "user_action", "system_event"
+  event_category        String   // "security", "performance", "compliance", "cost"
+  action                String   // "create", "update", "delete", "view", "execute"
+
+  // Resource Information
+  resource_type         String?  // "budget", "user", "config", "recognizer"
+  resource_id           String?
+  resource_name         String?
+
+  // User Information
+  user_id               String?
+  user_email            String?
+  user_role             String?
+
+  // Request Context
+  request_id            String?
+  session_id            String?
+  ip_address            String?
+  user_agent            String?
+
+  // Change Details
+  old_value             Json?
+  new_value             Json?
+  change_summary        String?
+
+  // Compliance Information
+  compliance_reason     String?  // "data_protection", "financial", "security"
+  retention_required    Boolean  @default(false)
+  retention_until       DateTime?
+
+  // System Information
+  service_name          String?
+  environment           String?
+  region                String?
+
+  // Timestamps
+  created_at            DateTime @default(now())
+
+  // Indexes for efficient querying
+  @@index([event_type])
+  @@index([event_category])
+  @@index([user_id])
+  @@index([resource_type])
+  @@index([created_at])
+
+  @@map("helix_audit_logs")
+}
+
+// Additional Relations to extend existing LiteLLM tables
+model LiteLLM_VerificationToken {
+  // This extends the existing LiteLLM_VerificationToken table
+
+  // Helix-specific fields
+  helix_config          Json?    @default("{}")  // Per-key Helix configuration
+  cache_preferences     Json?    @default("{}")  // Cache settings for this key
+  pii_preferences        Json?    @default("{}")  // PII settings for this key
+  cost_limits           Json?    @default("{}")  // Cost limits for this key
+
+  helix_requests        HelixRequestLog[]
+  helix_budgets         HelixBudget[]
+
+  // Existing fields would be here from the base schema
+}
+
+model LiteLLM_OrganizationTable {
+  // This extends the existing LiteLLM_OrganizationTable table
+
+  // Helix-specific fields
+  helix_enabled         Boolean  @default(false)
+  helix_config          Json?    @default("{}")  // Organization-wide Helix settings
+  compliance_settings   Json?    @default("{}")  // Compliance and audit settings
+  custom_pii_recognizers String[] @default([])  // Custom recognizers for this org
+
+  helix_requests        HelixRequestLog[]
+  helix_budgets         HelixBudget[]
+  helix_custom_pii_recognizers HelixCustomPIIRecognizer[]
+
+  // Existing fields would be here from the base schema
+}
+
+model LiteLLM_TeamTable {
+  // This extends the existing LiteLLM_TeamTable table
+
+  // Helix-specific fields
+  helix_config          Json?    @default("{}")  // Team-level Helix configuration
+  team_cache_preferences Json?   @default("{}")  // Team cache settings
+  team_pii_settings     Json?    @default("{}")  // Team PII settings
+
+  helix_requests        HelixRequestLog[]
+  helix_budgets         HelixBudget[]
+
+  // Existing fields would be here from the base schema
+}
+
+model LiteLLM_UserTable {
+  // This extends the existing LiteLLM_UserTable table
+
+  // Helix-specific fields
+  helix_preferences     Json?    @default("{}")  // User-level Helix preferences
+  personal_budget_id    String?  // Reference to personal budget
+
+  helix_requests        HelixRequestLog[]
+  helix_budgets         HelixBudget[]
+
+  // Existing fields would be here from the base schema
+}

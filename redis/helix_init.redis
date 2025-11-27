@@ -1,0 +1,168 @@
+# Helix Redis Initialization Script
+# Sets up Redis with required indexes and initial data structures
+# Optimized for high-performance semantic caching with HNSW
+
+# Create semantic search index for vector caching with optimized HNSW parameters
+# M=64: Number of bi-directional links created for each node during graph construction
+# EF_CONSTRUCTION=400: Size of the dynamic candidate list for constructing the graph
+# EF_RUNTIME=200: Size of the dynamic candidate list for searching
+FT.CREATE helix:semantic:index ON HASH PREFIX 1 "helix:vector:" SCHEMA \
+  prompt TEXT WEIGHT 1.0 \
+  model TEXT WEIGHT 1.0 \
+  response_json TEXT NOINDEX \
+  vector VECTOR HNSW 12 TYPE FLOAT32 DIM 1536 DISTANCE_METRIC COSINE \
+    INITIAL_CAP 10000 \
+    M 64 \
+    EF_CONSTRUCTION 400 \
+    EF_RUNTIME 200 \
+    EPSILON 0.01 \
+  cost FLOAT SORTABLE \
+  latency FLOAT SORTABLE \
+  hit_count INTEGER SORTABLE \
+  last_accessed NUMERIC SORTABLE \
+  created_at NUMERIC SORTABLE \
+  expires_at NUMERIC SORTABLE \
+  cache_level TAG \
+  embedding_model TAG
+
+# Create exact cache tracking sorted sets
+# These will track cache performance metrics
+ZADD helix:cache:metrics 0 "total_requests"
+ZADD helix:cache:metrics 0 "cache_hits"
+ZADD helix:cache:metrics 0 "cache_misses"
+ZADD helix:cache:metrics 0 "semantic_hits"
+ZADD helix:cache:metrics 0 "semantic_misses"
+
+# Create spend tracking structures
+# Total spend across all users
+ZADD helix:spend:total 0 "placeholder"
+
+# Initialize performance metrics counters
+SET helix:requests:total 0
+SET helix:requests:cache_hits 0
+SET helix:latency:p50 0
+SET helix:latency:p95 0
+SET helix:latency:p99 0
+
+# Create PII incidents list (will store recent incidents)
+RPUSH helix:pii:incidents "placeholder"
+LTRIM helix:pii:incidents 1 0  # Clear placeholder, keep empty list
+
+# Create user activity tracking structures
+ZADD helix:activity:daily 0 "total_active_users"
+ZADD helix:activity:models 0 "total_models_used"
+
+# Create model performance tracking
+HSET helix:model:performance:counter 0
+
+# Create cost optimization metrics
+HSET helix:cost:optimization:models_swapped 0
+HSET helix:cost:optimization:cost_saved 0
+
+# Initialize daily counters for the current date
+EVAL "
+local today = tostring(redis.call('TIME')[1])
+redis.call('HSET', 'helix:daily:' .. today, 'requests', 0, 'cache_hits', 0, 'spend', 0)
+" 0
+
+# Create alerts thresholds configuration
+HSET helix:alerts:thresholds spend_daily 100.0
+HSET helix:alerts:thresholds latency_p99 2000
+HSET helix:alerts:thresholds cache_hit_rate 50
+HSET helix:alerts:thresholds pii_incidents_hourly 10
+
+# Create system health check keys
+SET helix:health:last_check 0
+SET helix:health:status "initializing"
+
+# Create rate limiting structures (if needed)
+# These can be used for user-based rate limiting
+HSET helix:rate_limits:global requests_per_minute 1000
+
+# Create additional semantic cache structures for hybrid caching
+# Exact cache hash for precise matches
+HEXISTS helix:exact:cache placeholder || HSET helix:exact:cache placeholder ""
+
+# Semantic cache performance tracking
+ZADD helix:semantic:performance 0 "total_searches"
+ZADD helix:semantic:performance 0 "avg_similarity"
+ZADD helix:semantic:performance 0 "search_latency_ms"
+
+# Cache invalidation queue for cleanup tasks
+XADD helix:cache:invalidation * action init timestamp *
+XTRIM helix:cache:invalidation MAXLEN 10000
+
+# Batch processing queues for vector operations
+XADD helix:vector:batch:encode * action init timestamp *
+XTRIM helix:vector:batch:encode MAXLEN 5000
+
+# Cache warming structures
+XADD helix:cache:warming:queue * action init timestamp *
+XTRIM helix:cache:warming:queue MAXLEN 1000
+
+# Adaptive threshold tracking
+HSET helix:adaptive:thresholds semantic_base 0.85
+HSET helix:adaptive:thresholds semantic_min 0.70
+HSET helix:adaptive:thresholds semantic_max 0.95
+HSET helix:adaptive:thresholds performance_window 300
+HSET helix:adaptive:thresholds hit_rate_target 80.0
+
+# Memory usage tracking
+HSET helix:memory:usage vectors 0
+HSET helix:memory:usage exact_cache 0
+HSET helix:memory:usage metadata 0
+HSET helix:memory:usage total 0
+
+# Performance monitoring keys
+HSET helix:perf:counters vector_searches 0
+HSET helix:perf:counters exact_matches 0
+HSET helix:perf:counters semantic_matches 0
+HSET helix:perf:counters cache_evictions 0
+
+# TTL management
+HSET helix:ttl:default exact 3600
+HSET helix:ttl:default semantic 7200
+HSET helix:ttl:default hybrid 5400
+HSET helix:ttl:default metadata 86400
+
+# Create time-series data buckets
+for bucket_type in hourly daily weekly; do
+  XADD helix:metrics:$bucket_type * bucket $bucket_type timestamp 0 value 0
+  XTRIM helix:metrics:$bucket_type MAXLEN 1000
+done
+
+# Configuration for Redis memory management with optimized settings
+CONFIG SET maxmemory-policy allkeys-lru
+CONFIG SET maxmemory-samples 10
+CONFIG SET lazyfree-lazy-eviction yes
+CONFIG SET lazyfree-lazy-expire yes
+CONFIG SET lazyfree-lazy-server-del yes
+CONFIG SET hash-max-ziplist-entries 512
+CONFIG SET hash-max-ziplist-value 64
+CONFIG SET list-max-ziplist-size -2
+CONFIG SET set-max-intset-entries 512
+CONFIG SET zset-max-ziplist-entries 128
+CONFIG SET zset-max-ziplist-value 64
+
+# Set expiration policies for time-series data
+# Note: These will be managed by the application, but we set reasonable defaults
+
+# Create connection pool monitoring
+HSET helix:pool:active_connections default 0
+HSET helix:pool:max_connections default 100
+HSET helix:pool:connection_errors default 0
+
+# Async processing queues
+XADD helix:async:processing * action init timestamp *
+XTRIM helix:async:processing MAXLEN 10000
+
+echo "✅ Helix Redis initialization completed successfully!"
+echo "📊 Created semantic search index: helix:semantic:index"
+echo "🧠 Optimized HNSW parameters: M=64, EF_CONSTRUCTION=400, EF_RUNTIME=200"
+echo "💰 Initialized spend tracking structures"
+echo "🚀 Set up cache performance metrics"
+echo "🔒 Created PII incident tracking"
+echo "⚕️ Configured system health monitoring"
+echo "🔄 Created async processing queues"
+echo "📈 Added performance monitoring keys"
+echo "💾 Optimized memory management settings"

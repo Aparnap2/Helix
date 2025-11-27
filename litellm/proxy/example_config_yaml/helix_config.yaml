@@ -1,0 +1,221 @@
+# Helix AI Gateway Configuration
+# Based on LiteLLM with enhanced Helix features
+
+model_list:
+  - model_name: gpt-4o
+    litellm_params:
+      model: gpt-4o
+    model_info:
+      mode: chat
+      base_model: gpt-4o
+      supports_function_calling: true
+      supports_vision: true
+      input_cost_per_token: 0.000005
+      output_cost_per_token: 0.000015
+
+  - model_name: claude-3-5-sonnet
+    litellm_params:
+      model: claude-3-5-sonnet-20241022
+    model_info:
+      mode: chat
+      base_model: claude-3-5-sonnet
+      supports_function_calling: true
+      input_cost_per_token: 0.000003
+      output_cost_per_token: 0.000015
+
+  - model_name: gemini-pro
+    litellm_params:
+      model: gemini/gemini-pro
+    model_info:
+      mode: chat
+      base_model: gemini-pro
+      input_cost_per_token: 0.0000005
+      output_cost_per_token: 0.0000015
+
+  - model_name: fast-model
+    litellm_params:
+      model: groq/llama-3.1-70b-versatile
+    model_info:
+      mode: chat
+      base_model: llama-3.1-70b
+      input_cost_per_token: 0.00000059
+      output_cost_per_token: 0.00000079
+
+# LiteLLM Settings (existing)
+litellm_settings:
+  drop_params: true
+  success_callback: ["langfuse", "prometheus"]
+  cache: true
+  cache_params:
+    type: "redis"
+    host: "redis"
+    port: 6379
+    ttl: 3600  # 1 hour default cache
+
+# Helix-specific Settings
+helix_settings:
+  # Semantic Caching Configuration
+  semantic_cache:
+    enabled: true
+    similarity_threshold: 0.88
+    embedding_model: "all-MiniLM-L6-v2"
+    redis_index: "helix:semantic:index"
+    max_cache_size: 1000000
+    ttl: 2592000  # 30 days
+    supported_call_types: ["completion", "acompletion"]
+
+  # PII Protection Configuration
+  pii_protection:
+    enabled: true
+    strict_mode: true
+    entities:
+      - "CREDIT_CARD"
+      - "EMAIL_ADDRESS"
+      - "PHONE_NUMBER"
+      - "API_KEY"
+      - "PASSWORD"
+      - "SSN"
+      - "IBAN_CODE"
+      - "US_DRIVER_LICENSE"
+    action: "redact"  # Options: "redact", "block", "log_only"
+    output_parse_pii: false  # Set to true to restore PII in responses
+    log_all_incidents: true
+    log_level: "INFO"
+
+  # Cost Optimization Configuration
+  cost_optimization:
+    enabled: true
+    model_swapping: true
+    intelligent_routing: true
+    budget_alerts: true
+    auto_scale: true
+    rules:
+      - rule_name: "simple_queries_fast_model"
+        conditions:
+          max_tokens: 1000
+          prompt_type: "simple"
+        action:
+          model: "fast-model"
+          reason: "Cost optimization for simple queries"
+
+      - rule_name: "budget_conscious_users"
+        conditions:
+          user_tier: ["free", "basic"]
+          max_cost_per_request: 0.01
+        action:
+          prefer_cheaper_models: true
+          max_latency_ms: 5000
+
+  # Dashboard Configuration
+  dashboard:
+    enabled: true
+    port: 8501
+    refresh_interval: 5  # seconds
+    features:
+      - "cost_savings"
+      - "cache_performance"
+      - "pii_incidents"
+      - "user_leaderboard"
+      - "model_performance"
+      - "real_time_metrics"
+
+  # Analytics Configuration
+  analytics:
+    enabled: true
+    retention_days: 90
+    export_s3: null  # Set to S3 bucket for exporting
+    aggregation_interval: 300  # 5 minutes
+    metrics:
+      - "request_volume"
+      - "cache_hit_rate"
+      - "cost_savings"
+      - "latency_p99"
+      - "error_rate"
+      - "pii_incidents"
+
+# Router Configuration (existing LiteLLM)
+router_settings:
+  model_group_alias:
+    gpt-4-group:
+      - gpt-4o
+      - claude-3-5-sonnet
+    fast-models:
+      - fast-model
+      - gemini-pro
+
+  routing_strategy: "weighted_round_robin"  # or "least_busy", "usage_based"
+  health_check: true
+  health_check_interval: 30
+
+# User Management (existing LiteLLM)
+general_settings:
+  master_key: ${MASTER_KEY}
+  database_url: ${DATABASE_URL}
+
+user_api_key_auth:
+  - user_api_key: ${USER_API_KEY}
+    user_id: "demo-user"
+    spend: 0
+    max_budget: 100.0  # $100 monthly budget
+    models:
+      - gpt-4o
+      - claude-3-5-sonnet
+      - gemini-pro
+      - fast-model
+    helix_permissions:
+      semantic_cache: true
+      pii_protection: true
+      cost_optimization: true
+      dashboard_access: true
+
+# Security & Compliance
+security_settings:
+  enable_api_key_rotation: true
+  require_https: true
+  cors_origins: ["http://localhost:8501"]
+  rate_limiting:
+    requests_per_minute: 60
+    burst_size: 10
+
+# Monitoring & Observability (existing LiteLLM)
+observability:
+  prometheus:
+    enabled: true
+    port: 9090
+
+  langfuse:
+    enabled: true
+    public_key: ${LANGFUSE_PUBLIC_KEY}
+    secret_key: ${LANGFUSE_SECRET_KEY}
+    host: ${LANGFUSE_HOST}
+
+  datadog:
+    enabled: false
+    api_key: ${DATADOG_API_KEY}
+
+  open_telemetry:
+    enabled: false
+    endpoint: ${OTEL_ENDPOINT}
+
+# Environment-specific overrides
+environments:
+  development:
+    helix_settings:
+      semantic_cache:
+        similarity_threshold: 0.85  # More permissive in dev
+      pii_protection:
+        log_all_incidents: true
+        log_level: "DEBUG"
+
+  production:
+    helix_settings:
+      semantic_cache:
+        similarity_threshold: 0.90  # Stricter in production
+        max_cache_size: 10000000  # Larger cache
+      pii_protection:
+        strict_mode: true
+        action: "block"  # More conservative
+      cost_optimization:
+        auto_scale: true
+      analytics:
+        export_s3: "helix-analytics-production"

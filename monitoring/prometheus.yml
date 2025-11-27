@@ -1,0 +1,151 @@
+# Prometheus Configuration for Helix AI Gateway
+# Monitors all Helix components and LiteLLM proxy
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'helix-gateway'
+    environment: 'production'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Load rules once and periodically evaluate them
+rule_files:
+  - "helix_rules.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 30s
+    metrics_path: /metrics
+
+  # Helix LiteLLM Proxy
+  - job_name: 'helix-litellm-proxy'
+    static_configs:
+      - targets: ['litellm:4000']
+    scrape_interval: 15s
+    metrics_path: /metrics
+    scrape_timeout: 10s
+    params:
+      format: ['prometheus']
+    basic_auth:
+      username: 'prometheus'
+      password_file: /etc/prometheus/secrets/prometheus_password
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'helix-proxy'
+
+  # Redis Stack with RediSearch
+  - job_name: 'helix-redis'
+    static_configs:
+      - targets: ['redis:6379']
+    scrape_interval: 30s
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'helix-redis'
+
+  # PostgreSQL Database
+  - job_name: 'helix-postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+    scrape_interval: 30s
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'helix-postgres'
+
+  # Helix Dashboard (Streamlit)
+  - job_name: 'helix-dashboard'
+    static_configs:
+      - targets: ['helix-dashboard:8501']
+    scrape_interval: 60s
+    metrics_path: /_stcore/metrics
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'helix-dashboard'
+
+  # Grafana
+  - job_name: 'helix-grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+    scrape_interval: 30s
+    metrics_path: /metrics
+    basic_auth:
+      username: 'admin'
+      password_file: /etc/prometheus/secrets/grafana_password
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'helix-grafana'
+
+  # Node Exporter (if using for system metrics)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 30s
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'helix-server'
+
+  # cAdvisor (container metrics)
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 30s
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'helix-containers'
+
+  # Custom Helix Metrics Exporter (if implemented)
+  - job_name: 'helix-metrics-exporter'
+    static_configs:
+      - targets: ['helix-metrics-exporter:8080']
+    scrape_interval: 15s
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'helix-metrics-exporter'
+
+  # OpenTelemetry Collector (if using OTel)
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8888']
+    scrape_interval: 15s
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'otel-collector'
+
+# Remote write configuration (for long-term storage)
+# remote_write:
+#   - url: "https://your-long-term-storage/api/v1/write"
+#     basic_auth:
+#       username: your-username
+#       password: your-password
+
+# Storage configuration
+storage:
+  tsdb:
+    path: /prometheus
+    retention.time: 30d
+    retention.size: 10GB

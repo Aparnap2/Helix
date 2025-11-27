@@ -1,0 +1,415 @@
+# Helix AI Gateway Production Docker Compose Configuration
+# Comprehensive deployment with scaling, monitoring, and security
+
+version: "3.9"
+
+services:
+  # Enhanced LiteLLM Proxy with Helix features (Primary API Gateway)
+  litellm:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.helix
+      target: production
+    image: helix-proxy:latest
+    container_name: helix-proxy-1
+    command: /app/scripts/start-helix.sh
+    ports:
+      - "4000:4000"
+    environment:
+      # Core Configuration
+      - LITELLM_CONFIG=/app/config/helix_config.yaml
+      - HELIX_ENABLED=true
+      - HELIX_ENVIRONMENT=production
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://helix:${POSTGRES_PASSWORD}@postgres:5432/helix
+
+      # Authentication & Security
+      - MASTER_KEY=${MASTER_KEY}
+      - SALT_KEY=${SALT_KEY}
+      - HELIX_JWT_SECRET=${HELIX_JWT_SECRET}
+
+      # LLM Provider Keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - COHERE_API_KEY=${COHERE_API_KEY}
+      - AZURE_API_KEY=${AZURE_API_KEY}
+
+      # Monitoring & Observability
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+      - LANGFUSE_HOST=${LANGFUSE_HOST}
+      - PROMETHEUS_ENABLED=true
+      - PROMETHEUS_ENDPOINT=http://prometheus:9090
+
+      # Performance & Scaling
+      - HELIX_CACHE_TTL=86400
+      - HELIX_SIMILARITY_THRESHOLD=0.88
+      - HELIX_MAX_RETRIES=3
+      - HELIX_TIMEOUT=60
+
+      # Logging & Debugging
+      - HELIX_LOG_LEVEL=INFO
+      - HELIX_DEBUG=false
+      - HELIX_TELEMETRY_ENABLED=true
+
+    volumes:
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - ./helix:/app/helix
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - helix-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.5'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.helix-api.rule=Host(`api.helix.local`)"
+
+  # Redis with Vector Search capabilities (Cache + Semantic Search)
+  redis:
+    image: redis/redis-stack-server:latest
+    container_name: helix-redis
+    ports:
+      - "6379:6379"
+      - "8001:8001"  # RedisInsight
+    volumes:
+      - redis_data:/data
+      - ./config/redis/redis.conf:/usr/local/etc/redis/redis.conf
+      - ./config/redis/helix_init.redis:/docker-entrypoint-initdb.d/helix_init.redis
+    command: redis-server /usr/local/etc/redis/redis.conf --requirepass ${REDIS_PASSWORD}
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - helix-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+      restart_policy:
+        condition: on-failure
+
+  # PostgreSQL for persistent data (users, configs, logs)
+  postgres:
+    image: postgres:15-alpine
+    container_name: helix-postgres
+    environment:
+      - POSTGRES_DB=helix
+      - POSTGRES_USER=helix
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./config/postgres/helix_schema.sql:/docker-entrypoint-initdb.d/02-helix_schema.sql
+      - ./config/postgres/migrations:/docker-entrypoint-initdb.d/migrations
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U helix -d helix"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - helix-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+      restart_policy:
+        condition: on-failure
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Helix Dashboard (Streamlit) - Real-time Metrics & Monitoring
+  helix-dashboard:
+    build:
+      context: ./helix/dashboard
+      dockerfile: Dockerfile
+    image: helix-dashboard:latest
+    container_name: helix-dashboard
+    command: streamlit run dashboard.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true --server.enableCORS=false --server.enableXsrfProtection=false
+    ports:
+      - "8501:8501"
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - DATABASE_URL=postgresql://helix:${POSTGRES_PASSWORD}@postgres:5432/helix
+      - REFRESH_INTERVAL=5
+      - HELIX_LOG_LEVEL=INFO
+    volumes:
+      - ./helix/dashboard:/app
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - helix-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: helix-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./config/prometheus/helix_rules.yml:/etc/prometheus/helix_rules.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--query.max-concurrency=25'
+      - '--query.timeout=2m'
+    depends_on:
+      - litellm
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - helix-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: helix-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_USERS_ALLOW_ORG_CREATE=false
+      - GF_SMTP_ENABLED=${SMTP_ENABLED:-false}
+      - GF_SMTP_HOST=${SMTP_HOST}
+      - GF_SMTP_USER=${SMTP_USER}
+      - GF_SMTP_PASSWORD=${SMTP_PASSWORD}
+      - GF_INSTALL_PLUGINS=redis-datasource,grafana-piechart-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./config/grafana/plugins:/var/lib/grafana/plugins
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - helix-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  # Nginx reverse proxy for production
+  nginx:
+    image: nginx:1.24-alpine
+    container_name: helix-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/nginx/sites-available:/etc/nginx/conf.d:ro
+      - ./config/nginx/ssl:/etc/nginx/ssl:ro
+      - ./config/nginx/logs:/var/log/nginx
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+    depends_on:
+      - litellm
+      - helix-dashboard
+      - grafana
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - helix-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  # Redis Commander for Redis GUI (Development/Admin)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: helix-redis-commander
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379:0:${REDIS_PASSWORD}
+      - HTTP_USER=${REDIS_COMMANDER_USER}
+      - HTTP_PASSWORD=${REDIS_COMMANDER_PASSWORD}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - helix-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+    profiles: ["dev"]  # Only start with --profile dev
+
+  # Loki for log aggregation
+  loki:
+    image: grafana/loki:2.8.0
+    container_name: helix-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./config/loki/loki.yml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - helix-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    profiles: ["monitoring"]
+
+  # Promtail for log collection
+  promtail:
+    image: grafana/promtail:2.8.0
+    container_name: helix-promtail
+    volumes:
+      - ./config/promtail/promtail.yml:/etc/promtail/config.yml
+      - ./logs:/var/log/app:ro
+      - /var/log:/var/log/host:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    networks:
+      - helix-network
+    profiles: ["monitoring"]
+
+# Volumes for persistent data
+volumes:
+  redis_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/redis
+  postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/postgres
+  prometheus_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/prometheus
+  grafana_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data/grafana
+  loki_data:
+    driver: local
+
+# Network configuration
+networks:
+  helix-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
+    labels:
+      - "helix.network=true"
